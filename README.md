@@ -8,10 +8,11 @@ Point it at a Python repository. Each round covers one uncovered function. If th
 uv run coverage-agent run --demo
 ```
 
-That command uses no API key and no network. The bundled fixture starts at 75% because `sub` has no test. A scripted model writes the missing test. Stdout is one line:
+That command uses no API key and no network. The bundled fixture starts at 75% because `sub` has no test. A scripted model writes the missing test. Stdout is the coverage change, the branch, and one line per round:
 
 ```text
-coverage 100.0% on branch coverage/raise-to-100 (target hit)
+75.0% -> 100.0% on branch coverage/raise-to-100 (target hit)
+round 1: covered sub in fixture_app/calc.py (+25.0)
 ```
 
 Progress goes to stderr:
@@ -54,7 +55,7 @@ uv run coverage-agent run . --target 80 --provider ollama
 
 Python 3.11 or newer. Without uv: `python -m venv .venv`, activate it, then `pip install -e ".[dev]"`.
 
-The run creates a branch named `coverage/raise-to-80`. Read that branch before you merge it. The checklist at `.coverage-agent/strategy.md` stays untracked, and the next run in the same checkout starts from it.
+The run creates a branch named `coverage/raise-to-80`. Read that branch before you merge it. The checklist at `.coverage-agent/strategy.md` and the round log at `.coverage-agent/run.md` stay untracked. The next run in the same checkout starts from the checklist.
 
 Stdout is the summary line. A missing key, a dirty worktree, a failing existing suite, or a tree with no Python files is named on stderr and the process exits 1. If the loop finishes under the target, it still exits 0 and the summary says `target not hit`.
 

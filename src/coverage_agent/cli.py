@@ -61,12 +61,16 @@ def _run(args: argparse.Namespace) -> int:
         branch = start_branch(root, args.target)
         graph = build_graph(handles, root)
         result = graph.invoke(
-            initial_state(args.target, args.max_rounds),
+            initial_state(args.target, args.max_rounds, branch),
             config={"recursion_limit": 80},
         )
-        percent = float(result.get("best_coverage", result.get("coverage", 0)))
-        hit = "target hit" if percent >= args.target else "target not hit"
-        print(f"coverage {percent:.1f}% on branch {branch} ({hit})")
+        summary = result.get("summary")
+        if summary:
+            print(summary, end="")
+        else:
+            percent = float(result.get("best_coverage", result.get("coverage", 0)))
+            hit = "target hit" if percent >= args.target else "target not hit"
+            print(f"{percent:.1f}% -> {percent:.1f}% on branch {branch} ({hit})")
         return 0
     except CoverageError as exc:
         print(f"{exc.kind}: {exc}", file=sys.stderr)

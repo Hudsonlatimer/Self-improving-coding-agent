@@ -12,6 +12,7 @@ from coverage_agent.agents.repair import repair_edits
 from coverage_agent.agents.strategist import rewrite_strategy
 from coverage_agent.errors import CoverageError
 from coverage_agent.gitwork import commit_round, restore
+from coverage_agent.ledger import format_summary, note_round, save_run_log
 from coverage_agent.llm import ChatHandle
 from coverage_agent.measure import measure_project
 from coverage_agent.schemas import Plan
@@ -34,6 +35,10 @@ class LoopState(TypedDict, total=False):
     strategy: str
     plan: dict[str, Any]
     test_output: str
+    ledger: list[dict[str, Any]]
+    start_coverage: float
+    summary: str
+    branch: str
 
 
 def route_after_measure(state: dict[str, Any]) -> Literal["plan", "finish"]:
@@ -70,13 +75,16 @@ def build_graph(handles: dict[str, ChatHandle], root: Path):
             detail = report.output.strip() or "pytest failed before the agent made changes."
             raise CoverageError("pytest", detail)
         _status(f"Coverage {report.percent:.1f}%")
-        return {
+        payload: dict[str, Any] = {
             "coverage": report.percent,
             "best_coverage": report.percent,
             "gaps": [gap.as_dict() for gap in report.gaps],
             "test_output": report.output,
             "test_ok": report.tests_passed,
         }
+        if "start_coverage" not in state:
+            payload["start_coverage"] = report.percent
+        return payload
 
     def plan(state: dict[str, Any]) -> dict[str, Any]:
         strategy = load_strategy(root)
@@ -117,10 +125,21 @@ def build_graph(handles: dict[str, ChatHandle], root: Path):
             "test_output": report.output,
             "gaps": [gap.as_dict() for gap in report.gaps],
         }
+        plan = state.get("plan") or {}
+        file_name = plan.get("file") or "coverage"
+        symbol = plan.get("symbol") or ""
         if report.tests_passed and delta > 0:
-            file_name = (state.get("plan") or {}).get("file", "coverage")
-            commit_round(root, f"Cover {file_name}")
+            commit_round(root, f"Cover {symbol or file_name} in {file_name}")
             payload["best_coverage"] = report.percent
+            payload["ledger"] = note_round(
+                state.get("ledger"),
+                number=state.get("round", 0),
+                file_name=file_name,
+                symbol=symbol,
+                before=before,
+                after=report.percent,
+                outcome="raised",
+            )
             _status(f"Tests passed. Coverage {report.percent:.1f}% (+{delta:.1f})")
         else:
             _status("Round did not raise coverage")
@@ -146,11 +165,34 @@ def build_graph(handles: dict[str, ChatHandle], root: Path):
             state.get("plan") or {},
         )
         save_strategy(root, update.checklist)
-        return {"stalls": state.get("stalls", 0) + 1, "strategy": update.checklist}
+        plan = state.get("plan") or {}
+        before = float(state.get("best_coverage", state.get("coverage", 0)))
+        return {
+            "stalls": state.get("stalls", 0) + 1,
+            "strategy": update.checklist,
+            "ledger": note_round(
+                state.get("ledger"),
+                number=state.get("round", 0),
+                file_name=plan.get("file") or "coverage",
+                symbol=plan.get("symbol") or "",
+                before=before,
+                after=before,
+                outcome="reverted",
+            ),
+        }
 
     def finish(state: dict[str, Any]) -> dict[str, Any]:
         best = float(state.get("best_coverage", state.get("coverage", 0)))
-        return {"hit": best >= state["target"], "best_coverage": best}
+        start = float(state.get("start_coverage", best))
+        summary = format_summary(
+            start,
+            best,
+            state.get("branch") or "",
+            float(state["target"]),
+            state.get("ledger") or [],
+        )
+        save_run_log(root, summary)
+        return {"hit": best >= state["target"], "best_coverage": best, "summary": summary}
 
     graph = StateGraph(LoopState)
     graph.add_node("measure", measure)
@@ -179,10 +221,11 @@ def build_graph(handles: dict[str, ChatHandle], root: Path):
     return graph.compile()
 
 
-def initial_state(target: float, max_rounds: int) -> dict[str, Any]:
+def initial_state(target: float, max_rounds: int, branch: str = "") -> dict[str, Any]:
     return {
         "target": target,
         "max_rounds": max_rounds,
+        "branch": branch,
         "round": 0,
         "stalls": 0,
         "coverage": 0.0,

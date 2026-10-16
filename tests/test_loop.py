@@ -9,6 +9,7 @@ from coverage_agent.cli import main
 from coverage_agent.errors import CoverageError
 from coverage_agent.gitwork import commit_round, dirty_entries, ensure_clean, resolve_edit, restore
 from coverage_agent.graph import route_after_measure, route_after_strategist, route_after_test
+from coverage_agent.ledger import format_summary
 from coverage_agent.measure import rank_gaps
 from coverage_agent.schemas import FileEdit, Plan
 from coverage_agent.strategy import load_strategy, save_strategy
@@ -114,11 +115,42 @@ def test_git_refuses_a_dirty_tree_and_can_commit_then_restore(tmp_path: Path):
     assert (tmp_path / "new.py").is_file()
 
 
+def test_summary_names_a_covered_function_and_a_reverted_round():
+    text = format_summary(
+        40,
+        55,
+        "coverage/raise-to-80",
+        80,
+        [
+            {
+                "round": 1,
+                "file": "pkg/calc.py",
+                "symbol": "sub",
+                "before": 40,
+                "after": 55,
+                "outcome": "raised",
+            },
+            {
+                "round": 2,
+                "file": "pkg/calc.py",
+                "symbol": "div",
+                "before": 55,
+                "after": 55,
+                "outcome": "reverted",
+            },
+        ],
+    )
+    assert text.startswith("40.0% -> 55.0% on branch coverage/raise-to-80 (target not hit)\n")
+    assert "round 1: covered sub in pkg/calc.py (+15.0)" in text
+    assert "round 2: reverted div in pkg/calc.py and rewrote the checklist" in text
+
+
 def test_demo_reaches_full_coverage(capsys: pytest.CaptureFixture[str]):
     code = main(["run", "--demo", "--target", "100", "--max-rounds", "2"])
     captured = capsys.readouterr()
     assert code == 0, captured.err
-    assert "coverage 100.0% on branch coverage/raise-to-100 (target hit)" in captured.out
+    assert "75.0% -> 100.0% on branch coverage/raise-to-100 (target hit)" in captured.out
+    assert "round 1: covered sub in fixture_app/calc.py (+25.0)" in captured.out
 
 
 def test_non_python_and_missing_key(
